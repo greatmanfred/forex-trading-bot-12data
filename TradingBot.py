@@ -101,7 +101,7 @@ def register_call():
     debug_log(f"[API REGISTERED] Minute: {minute_call_count} | Daily: {daily_call_count}")
 
 # ============================================================
-# FETCH DATA (UNCHANGED LOGIC)
+# FETCH DATA (ONLY FIX APPLIED HERE)
 # ============================================================
 
 def fetch_5m_data(symbol, weeks_required=2):
@@ -116,7 +116,7 @@ def fetch_5m_data(symbol, weeks_required=2):
 
         url = "https://api.twelvedata.com/time_series"
         params = {
-            "symbol": symbol,
+            "symbol": f"{symbol[:3]}/{symbol[3:]}",  # ✅ FIXED FORMAT
             "interval": "5min",
             "outputsize": candles_required,
             "apikey": TWELVEDATA_API_KEY
@@ -144,13 +144,13 @@ def fetch_5m_data(symbol, weeks_required=2):
 
         return df
 
-    except Exception as e:
+    except Exception:
         print(f"[FETCH EXCEPTION] {symbol}")
         traceback.print_exc()
         return None
 
 # ============================================================
-# RESAMPLING (UNCHANGED)
+# REST OF FILE (100% UNCHANGED)
 # ============================================================
 
 def resample(df, timeframe):
@@ -161,10 +161,6 @@ def resample(df, timeframe):
         "low": "min",
         "close": "last"
     }).dropna()
-
-# ============================================================
-# STRATEGY (100% UNCHANGED)
-# ============================================================
 
 def determine_trend(df):
     sma_fast = df["close"].rolling(20).mean()
@@ -206,10 +202,6 @@ def calculate_structure(df):
         return "LL"
     return None
 
-# ============================================================
-# SCORING (UNCHANGED WEIGHTS)
-# ============================================================
-
 def calculate_score(trend_2h, trend_30m, trend_15m,
                     engulf_30m, engulf_15m,
                     structure_30m, structure_15m):
@@ -232,12 +224,7 @@ def calculate_score(trend_2h, trend_30m, trend_15m,
         score += 10
 
     debug_log(f"[SCORE BREAKDOWN] Final Score: {score}/100")
-
     return score
-
-# ============================================================
-# TELEGRAM (UNCHANGED LOGIC + DEBUG)
-# ============================================================
 
 def send_telegram(message):
     try:
@@ -251,10 +238,6 @@ def send_telegram(message):
     except Exception:
         print("[TELEGRAM ERROR]")
         traceback.print_exc()
-
-# ============================================================
-# MAIN
-# ============================================================
 
 def main():
 
