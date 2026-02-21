@@ -126,8 +126,8 @@ def fetch_5m_data(symbol, weeks_required=2):
         print(f"[FETCH DATA KEYS] {symbol}: {list(data.keys())}")
 
     if "values" not in data:
-        print(f"[ERROR] No values returned for {symbol}")
-        return None
+    print(f"[FULL API ERROR] {symbol} -> {data}")
+    return None
 
     df = pd.DataFrame(data["values"])
     df = df.astype(float)
