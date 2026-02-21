@@ -1,6 +1,7 @@
 # ============================================================
 # TradingBot.py
 # Structured Multi-Timeframe Confluence Trading Bot
+# DEBUG VERSION (Full Logging Enabled)
 # ============================================================
 
 import os
@@ -26,6 +27,8 @@ MINUTE_CALL_LIMIT = 7
 DAILY_CALL_LIMIT = 750
 CONFIDENCE_THRESHOLD = 68.5
 RR_RATIO = 2.0
+
+DEBUG = True  # 🔥 NEW
 
 minute_call_count = 0
 daily_call_count = 0
@@ -55,28 +58,29 @@ def check_rate_limit():
 
     now = time.time()
 
-    # Reset minute window
+    if DEBUG:
+        print(f"[RATE CHECK] Minute: {minute_call_count}/7 | Daily: {daily_call_count}/750")
+
     if now - minute_window_start >= 60:
         minute_call_count = 0
         minute_window_start = now
 
-    # Reset daily window
     if now - daily_window_start >= 86400:
         daily_call_count = 0
         daily_window_start = now
 
-    # Enforce minute limit
     if minute_call_count == MINUTE_CALL_LIMIT:
         sleep_time = 60 - (now - minute_window_start)
         if sleep_time > 0:
+            print(f"[SLEEP] Waiting {sleep_time:.2f}s (Minute limit)")
             time.sleep(sleep_time)
         minute_call_count = 0
         minute_window_start = time.time()
 
-    # Enforce daily limit
     if daily_call_count == DAILY_CALL_LIMIT:
         sleep_time = 86400 - (now - daily_window_start)
         if sleep_time > 0:
+            print(f"[SLEEP] Waiting {sleep_time:.2f}s (Daily limit)")
             time.sleep(sleep_time)
         daily_call_count = 0
         daily_window_start = time.time()
@@ -86,20 +90,14 @@ def register_call():
     minute_call_count += 1
     daily_call_count += 1
 
+    if DEBUG:
+        print(f"[API CALL REGISTERED] Minute: {minute_call_count} | Daily: {daily_call_count}")
+
 # ============================================================
 # DATA FETCH (5M ONLY)
 # ============================================================
 
 def fetch_5m_data(symbol, weeks_required=2):
-    """
-    Fetch 5M historical data sufficient to construct
-    2H candles for desired weeks.
-    """
-
-    # 2H candles per week = 7 days * 12 candles/day = 84
-    # For 2 weeks = 168 2H candles
-    # Each 2H candle = 24 x 5M candles
-    # Required 5M candles = 168 * 24 = 4032
 
     candles_5m_required = weeks_required * 7 * 12 * 24
 
@@ -113,12 +111,22 @@ def fetch_5m_data(symbol, weeks_required=2):
         "apikey": TWELVEDATA_API_KEY
     }
 
+    if DEBUG:
+        print(f"[FETCH] {symbol} | 5M Candles: {candles_5m_required}")
+
     response = requests.get(url, params=params)
     register_call()
 
+    if DEBUG:
+        print(f"[FETCH STATUS] {symbol} | HTTP {response.status_code}")
+
     data = response.json()
 
+    if DEBUG:
+        print(f"[FETCH DATA KEYS] {symbol}: {list(data.keys())}")
+
     if "values" not in data:
+        print(f"[ERROR] No values returned for {symbol}")
         return None
 
     df = pd.DataFrame(data["values"])
@@ -126,6 +134,9 @@ def fetch_5m_data(symbol, weeks_required=2):
     df["datetime"] = pd.to_datetime(df["datetime"])
     df.sort_values("datetime", inplace=True)
     df.set_index("datetime", inplace=True)
+
+    if DEBUG:
+        print(f"[DATA RECEIVED] {symbol} | Rows: {len(df)}")
 
     return df
 
@@ -186,7 +197,7 @@ def calculate_structure(df):
     return None
 
 # ============================================================
-# SCORING SYSTEM (100 POINTS TOTAL)
+# SCORING SYSTEM
 # ============================================================
 
 def calculate_score(trend_2h, trend_30m, trend_15m,
@@ -195,33 +206,23 @@ def calculate_score(trend_2h, trend_30m, trend_15m,
 
     score = 0
 
-    # 2H trend weight = 25
     if trend_2h != "RANGE":
         score += 25
-
-    # 30M alignment weight = 20
     if trend_30m == trend_2h:
         score += 20
-
-    # 15M alignment weight = 15
     if trend_15m == trend_2h:
         score += 15
-
-    # 30M engulfing weight = 10
     if engulf_30m:
         score += 10
-
-    # 15M engulfing weight = 10
     if engulf_15m:
         score += 10
-
-    # 30M structure weight = 10
     if structure_30m:
         score += 10
-
-    # 15M structure weight = 10
     if structure_15m:
         score += 10
+
+    if DEBUG:
+        print(f"[SCORE CALCULATED] {score}/100")
 
     return score
 
@@ -235,7 +236,10 @@ def send_telegram(message):
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message
     }
-    requests.post(url, data=payload)
+    response = requests.post(url, data=payload)
+
+    if DEBUG:
+        print(f"[TELEGRAM RESPONSE] {response.status_code} | {response.text}")
 
 # ============================================================
 # MAIN EXECUTION
@@ -243,9 +247,16 @@ def send_telegram(message):
 
 def main():
 
+    print("\n==============================")
+    print("TRADING BOT STARTED")
+    print("==============================")
+
     invalid_signals = []
 
     for symbol in SYMBOLS:
+
+        print("\n==============================")
+        print(f"[SCANNING] {symbol}")
 
         df_5m = fetch_5m_data(symbol)
         if df_5m is None:
@@ -259,11 +270,21 @@ def main():
         trend_30m = determine_trend(df_30m)
         trend_15m = determine_trend(df_15m)
 
+        print(f"2H Trend: {trend_2h}")
+        print(f"30M Trend: {trend_30m}")
+        print(f"15M Trend: {trend_15m}")
+
         engulf_30m = detect_engulfing(df_30m)
         engulf_15m = detect_engulfing(df_15m)
 
+        print(f"30M Engulfing: {engulf_30m}")
+        print(f"15M Engulfing: {engulf_15m}")
+
         structure_30m = calculate_structure(df_30m)
         structure_15m = calculate_structure(df_15m)
+
+        print(f"30M Structure: {structure_30m}")
+        print(f"15M Structure: {structure_15m}")
 
         score = calculate_score(
             trend_2h,
@@ -276,6 +297,7 @@ def main():
         )
 
         confidence = (score / 100) * 100
+        print(f"[CONFIDENCE] {symbol}: {confidence:.2f}%")
 
         if confidence >= CONFIDENCE_THRESHOLD:
 
@@ -290,6 +312,8 @@ def main():
                 tp = entry - (sl - entry) * RR_RATIO
                 direction = "SELL"
 
+            print(f"[VALID SIGNAL] {symbol} | {direction}")
+
             message = (
                 f"{symbol} {direction}\n"
                 f"Confidence: {confidence:.2f}%\n"
@@ -301,11 +325,14 @@ def main():
             send_telegram(message)
 
         else:
+            print(f"[REJECTED] {symbol} | Confidence: {confidence:.2f}%")
             invalid_signals.append(f"{symbol} - {confidence:.2f}%")
 
     if invalid_signals:
         summary = "Invalid Signals Summary:\n" + "\n".join(invalid_signals)
         send_telegram(summary)
+
+    print("\nBOT FINISHED SCANNING ALL SYMBOLS")
 
 if __name__ == "__main__":
     main()
