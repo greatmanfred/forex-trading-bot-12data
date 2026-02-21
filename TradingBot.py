@@ -1,7 +1,7 @@
 # ============================================================
 # TradingBot.py
 # Structured Multi-Timeframe Confluence Trading Bot
-# FULL DEBUG VERSION (Strategy Unchanged)
+# FULL DEBUG VERSION (Strategy Unchanged - Data Fix Applied)
 # ============================================================
 
 import os
@@ -101,7 +101,7 @@ def register_call():
     debug_log(f"[API REGISTERED] Minute: {minute_call_count} | Daily: {daily_call_count}")
 
 # ============================================================
-# FETCH DATA (ONLY FIX APPLIED HERE)
+# FETCH DATA (FIXED SAFELY)
 # ============================================================
 
 def fetch_5m_data(symbol, weeks_required=2):
@@ -116,7 +116,7 @@ def fetch_5m_data(symbol, weeks_required=2):
 
         url = "https://api.twelvedata.com/time_series"
         params = {
-            "symbol": f"{symbol[:3]}/{symbol[3:]}",  # ✅ FIXED FORMAT
+            "symbol": f"{symbol[:3]}/{symbol[3:]}",
             "interval": "5min",
             "outputsize": candles_required,
             "apikey": TWELVEDATA_API_KEY
@@ -135,7 +135,13 @@ def fetch_5m_data(symbol, weeks_required=2):
             return None
 
         df = pd.DataFrame(data["values"])
-        df = df.astype(float)
+
+        # ✅ FIX: Convert ONLY numeric columns
+        df["open"] = df["open"].astype(float)
+        df["high"] = df["high"].astype(float)
+        df["low"] = df["low"].astype(float)
+        df["close"] = df["close"].astype(float)
+
         df["datetime"] = pd.to_datetime(df["datetime"])
         df.sort_values("datetime", inplace=True)
         df.set_index("datetime", inplace=True)
@@ -150,7 +156,7 @@ def fetch_5m_data(symbol, weeks_required=2):
         return None
 
 # ============================================================
-# REST OF FILE (100% UNCHANGED)
+# STRATEGY LOGIC (100% UNCHANGED)
 # ============================================================
 
 def resample(df, timeframe):
@@ -276,7 +282,7 @@ def main():
             structure_30m, structure_15m
         )
 
-        confidence = (score / 100) * 100
+        confidence = score
         debug_log(f"[CONFIDENCE] {confidence:.2f}%")
 
         if confidence >= CONFIDENCE_THRESHOLD:
