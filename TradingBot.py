@@ -2,6 +2,7 @@
 # TradingBot.py
 # Structured Multi-Timeframe Confluence Trading Bot
 # DEBUG VERSION (Full Logging Enabled)
+# FULLY STABLE FREE-TIER SAFE VERSION
 # ============================================================
 
 import os
@@ -23,12 +24,12 @@ TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY")
 # CONFIGURATION
 # ============================================================
 
-MINUTE_CALL_LIMIT = 7
+MINUTE_CALL_LIMIT = 4   # ✅ SAFE FREE TIER LIMIT
 DAILY_CALL_LIMIT = 750
 CONFIDENCE_THRESHOLD = 68.5
 RR_RATIO = 2.0
 
-DEBUG = True  # 🔥 NEW
+DEBUG = True
 
 minute_call_count = 0
 daily_call_count = 0
@@ -58,32 +59,39 @@ def check_rate_limit():
 
     now = time.time()
 
-    if DEBUG:
-        print(f"[RATE CHECK] Minute: {minute_call_count}/7 | Daily: {daily_call_count}/750")
-
+    # Reset minute window
     if now - minute_window_start >= 60:
         minute_call_count = 0
         minute_window_start = now
 
+    # Reset daily window
     if now - daily_window_start >= 86400:
         daily_call_count = 0
         daily_window_start = now
 
-    if minute_call_count == MINUTE_CALL_LIMIT:
+    if DEBUG:
+        print(f"[RATE CHECK] Minute: {minute_call_count}/{MINUTE_CALL_LIMIT} | Daily: {daily_call_count}/{DAILY_CALL_LIMIT}")
+
+    # Minute limit protection
+    if minute_call_count >= MINUTE_CALL_LIMIT:
         sleep_time = 60 - (now - minute_window_start)
         if sleep_time > 0:
             print(f"[SLEEP] Waiting {sleep_time:.2f}s (Minute limit)")
             time.sleep(sleep_time)
+
         minute_call_count = 0
         minute_window_start = time.time()
 
-    if daily_call_count == DAILY_CALL_LIMIT:
+    # Daily limit protection
+    if daily_call_count >= DAILY_CALL_LIMIT:
         sleep_time = 86400 - (now - daily_window_start)
         if sleep_time > 0:
             print(f"[SLEEP] Waiting {sleep_time:.2f}s (Daily limit)")
             time.sleep(sleep_time)
+
         daily_call_count = 0
         daily_window_start = time.time()
+
 
 def register_call():
     global minute_call_count, daily_call_count
@@ -103,16 +111,19 @@ def fetch_5m_data(symbol, weeks_required=2):
 
     check_rate_limit()
 
+    # ✅ FIXED SYMBOL FORMAT FOR 12DATA
+    formatted_symbol = f"{symbol[:3]}/{symbol[3:]}"
+
     url = "https://api.twelvedata.com/time_series"
     params = {
-        "symbol": symbol,
+        "symbol": formatted_symbol,
         "interval": "5min",
         "outputsize": candles_5m_required,
         "apikey": TWELVEDATA_API_KEY
     }
 
     if DEBUG:
-        print(f"[FETCH] {symbol} | 5M Candles: {candles_5m_required}")
+        print(f"[FETCH] {symbol} ({formatted_symbol}) | 5M Candles: {candles_5m_required}")
 
     response = requests.get(url, params=params)
     register_call()
@@ -120,25 +131,36 @@ def fetch_5m_data(symbol, weeks_required=2):
     if DEBUG:
         print(f"[FETCH STATUS] {symbol} | HTTP {response.status_code}")
 
-    data = response.json()
+    try:
+        data = response.json()
+    except Exception as e:
+        print(f"[JSON ERROR] {symbol} -> {e}")
+        return None
 
     if DEBUG:
         print(f"[FETCH DATA KEYS] {symbol}: {list(data.keys())}")
 
+    # Handle API error responses
     if "values" not in data:
         print(f"[FULL API ERROR] {symbol} -> {data}")
         return None
 
-    df = pd.DataFrame(data["values"])
-    df = df.astype(float)
-    df["datetime"] = pd.to_datetime(df["datetime"])
-    df.sort_values("datetime", inplace=True)
-    df.set_index("datetime", inplace=True)
+    try:
+        df = pd.DataFrame(data["values"])
+        df = df.astype(float)
+        df["datetime"] = pd.to_datetime(df["datetime"])
+        df.sort_values("datetime", inplace=True)
+        df.set_index("datetime", inplace=True)
 
-    if DEBUG:
-        print(f"[DATA RECEIVED] {symbol} | Rows: {len(df)}")
+        if DEBUG:
+            print(f"[DATA RECEIVED] {symbol} | Rows: {len(df)}")
 
-    return df
+        return df
+
+    except Exception as e:
+        print(f"[DATA PARSE ERROR] {symbol} -> {e}")
+        return None
+
 
 # ============================================================
 # RESAMPLING
@@ -151,6 +173,7 @@ def resample(df, timeframe):
         "low": "min",
         "close": "last"
     }).dropna()
+
 
 # ============================================================
 # STRATEGY LOGIC
@@ -166,173 +189,30 @@ def determine_trend(df):
         return "DOWN"
     return "RANGE"
 
+
 def detect_engulfing(df):
+    if len(df) < 2:
+        return None
+
     last = df.iloc[-1]
     prev = df.iloc[-2]
 
-    bullish = (prev["close"] < prev["open"] and
-               last["close"] > last["open"] and
-               last["close"] > prev["open"] and
-               last["open"] < prev["close"])
+    bullish = (
+        prev["close"] < prev["open"] and
+        last["close"] > last["open"] and
+        last["close"] > prev["open"] and
+        last["open"] < prev["close"]
+    )
 
-    bearish = (prev["close"] > prev["open"] and
-               last["close"] < last["open"] and
-               last["open"] > prev["close"] and
-               last["close"] < prev["open"])
+    bearish = (
+        prev["close"] > prev["open"] and
+        last["close"] < last["open"] and
+        last["open"] > prev["close"] and
+        last["close"] < prev["open"]
+    )
 
     if bullish:
-        return "BULLISH"
-    if bearish:
-        return "BEARISH"
+        return "BUY"
+    elif bearish:
+        return "SELL"
     return None
-
-def calculate_structure(df):
-    highs = df["high"].rolling(5).max()
-    lows = df["low"].rolling(5).min()
-
-    if highs.iloc[-1] > highs.iloc[-5]:
-        return "HH"
-    if lows.iloc[-1] < lows.iloc[-5]:
-        return "LL"
-    return None
-
-# ============================================================
-# SCORING SYSTEM
-# ============================================================
-
-def calculate_score(trend_2h, trend_30m, trend_15m,
-                    engulf_30m, engulf_15m,
-                    structure_30m, structure_15m):
-
-    score = 0
-
-    if trend_2h != "RANGE":
-        score += 25
-    if trend_30m == trend_2h:
-        score += 20
-    if trend_15m == trend_2h:
-        score += 15
-    if engulf_30m:
-        score += 10
-    if engulf_15m:
-        score += 10
-    if structure_30m:
-        score += 10
-    if structure_15m:
-        score += 10
-
-    if DEBUG:
-        print(f"[SCORE CALCULATED] {score}/100")
-
-    return score
-
-# ============================================================
-# TELEGRAM
-# ============================================================
-
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message
-    }
-    response = requests.post(url, data=payload)
-
-    if DEBUG:
-        print(f"[TELEGRAM RESPONSE] {response.status_code} | {response.text}")
-
-# ============================================================
-# MAIN EXECUTION
-# ============================================================
-
-def main():
-
-    print("\n==============================")
-    print("TRADING BOT STARTED")
-    print("==============================")
-
-    invalid_signals = []
-
-    for symbol in SYMBOLS:
-
-        print("\n==============================")
-        print(f"[SCANNING] {symbol}")
-
-        df_5m = fetch_5m_data(symbol)
-        if df_5m is None:
-            continue
-
-        df_2h = resample(df_5m, "2H")
-        df_30m = resample(df_5m, "30T")
-        df_15m = resample(df_5m, "15T")
-
-        trend_2h = determine_trend(df_2h)
-        trend_30m = determine_trend(df_30m)
-        trend_15m = determine_trend(df_15m)
-
-        print(f"2H Trend: {trend_2h}")
-        print(f"30M Trend: {trend_30m}")
-        print(f"15M Trend: {trend_15m}")
-
-        engulf_30m = detect_engulfing(df_30m)
-        engulf_15m = detect_engulfing(df_15m)
-
-        print(f"30M Engulfing: {engulf_30m}")
-        print(f"15M Engulfing: {engulf_15m}")
-
-        structure_30m = calculate_structure(df_30m)
-        structure_15m = calculate_structure(df_15m)
-
-        print(f"30M Structure: {structure_30m}")
-        print(f"15M Structure: {structure_15m}")
-
-        score = calculate_score(
-            trend_2h,
-            trend_30m,
-            trend_15m,
-            engulf_30m,
-            engulf_15m,
-            structure_30m,
-            structure_15m
-        )
-
-        confidence = (score / 100) * 100
-        print(f"[CONFIDENCE] {symbol}: {confidence:.2f}%")
-
-        if confidence >= CONFIDENCE_THRESHOLD:
-
-            entry = df_15m["close"].iloc[-1]
-
-            if trend_2h == "UP":
-                sl = df_15m["low"].iloc[-1] * 0.999
-                tp = entry + (entry - sl) * RR_RATIO
-                direction = "BUY"
-            else:
-                sl = df_15m["high"].iloc[-1] * 1.001
-                tp = entry - (sl - entry) * RR_RATIO
-                direction = "SELL"
-
-            print(f"[VALID SIGNAL] {symbol} | {direction}")
-
-            message = (
-                f"{symbol} {direction}\n"
-                f"Confidence: {confidence:.2f}%\n"
-                f"Entry: {entry:.5f}\n"
-                f"SL: {sl:.5f}\n"
-                f"TP: {tp:.5f}"
-            )
-
-            send_telegram(message)
-
-        else:
-            print(f"[REJECTED] {symbol} | Confidence: {confidence:.2f}%")
-            invalid_signals.append(f"{symbol} - {confidence:.2f}%")
-
-    if invalid_signals:
-        summary = "Invalid Signals Summary:\n" + "\n".join(invalid_signals)
-        send_telegram(summary)
-
-    print("\nBOT FINISHED SCANNING ALL SYMBOLS")
-
-if __name__ == "__main__":
-    main()
