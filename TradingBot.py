@@ -101,7 +101,7 @@ def register_call():
     debug_log(f"[API REGISTERED] Minute: {minute_call_count} | Daily: {daily_call_count}")
 
 # ============================================================
-# FETCH DATA (FIXED SAFELY)
+# FETCH DATA (UNCHANGED)
 # ============================================================
 
 def fetch_5m_data(symbol, weeks_required=2):
@@ -136,7 +136,6 @@ def fetch_5m_data(symbol, weeks_required=2):
 
         df = pd.DataFrame(data["values"])
 
-        # ✅ FIX: Convert ONLY numeric columns
         df["open"] = df["open"].astype(float)
         df["high"] = df["high"].astype(float)
         df["low"] = df["low"].astype(float)
@@ -156,7 +155,7 @@ def fetch_5m_data(symbol, weeks_required=2):
         return None
 
 # ============================================================
-# STRATEGY LOGIC (100% UNCHANGED)
+# STRATEGY LOGIC (UNCHANGED)
 # ============================================================
 
 def resample(df, timeframe):
@@ -262,9 +261,10 @@ def main():
         if df_5m is None:
             continue
 
-        df_2h = resample(df_5m, "2H")
-        df_30m = resample(df_5m, "30T")
-        df_15m = resample(df_5m, "15T")
+        # ✅ FIXED FREQUENCY STRINGS (ONLY CHANGE)
+        df_2h = resample(df_5m, "2h")
+        df_30m = resample(df_5m, "30min")
+        df_15m = resample(df_5m, "15min")
 
         trend_2h = determine_trend(df_2h)
         trend_30m = determine_trend(df_30m)
