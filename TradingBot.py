@@ -1,7 +1,7 @@
 # ============================================================
 # TradingBot.py
 # Institutional Adaptive Volatility-Rated Intelligence Engine
-# Strategy Core Unchanged - Stability & Error Fix Version
+# WEIGHTED MICRO DUAL-DIRECTION VERSION (68% THRESHOLD)
 # ============================================================
 
 import os
@@ -25,7 +25,7 @@ TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY")
 
 MINUTE_CALL_LIMIT = 7
 DAILY_CALL_LIMIT = 750
-CONFIDENCE_THRESHOLD = 60.0
+CONFIDENCE_THRESHOLD = 68.0
 RR_RATIO = 2.0
 DEBUG = True
 
@@ -35,7 +35,7 @@ minute_window_start = time.time()
 daily_window_start = time.time()
 
 # ============================================================
-# SYMBOLS (UNCHANGED)
+# SYMBOLS
 # ============================================================
 
 SYMBOLS = [
@@ -56,7 +56,7 @@ def debug_log(msg):
         print(msg)
 
 # ============================================================
-# RATE LIMIT CONTROL (UNCHANGED)
+# RATE LIMIT CONTROL
 # ============================================================
 
 def check_rate_limit():
@@ -93,7 +93,7 @@ def register_call():
     daily_call_count += 1
 
 # ============================================================
-# FETCH DATA (STABILITY FIXED)
+# FETCH DATA
 # ============================================================
 
 def fetch_5m_data(symbol, weeks_required=2):
@@ -143,7 +143,7 @@ def fetch_5m_data(symbol, weeks_required=2):
         return None
 
 # ============================================================
-# CORE STRATEGY (LOGIC UNCHANGED — SAFETY ADDED)
+# RESAMPLE
 # ============================================================
 
 def resample(df, timeframe):
@@ -155,6 +155,10 @@ def resample(df, timeframe):
     }).dropna()
 
     return df_resampled if len(df_resampled) > 50 else pd.DataFrame()
+
+# ============================================================
+# TREND
+# ============================================================
 
 def determine_trend(df):
     if len(df) < 50:
@@ -171,6 +175,10 @@ def determine_trend(df):
     elif sma_fast.iloc[-1] < sma_slow.iloc[-1]:
         return "DOWN"
     return "RANGE"
+
+# ============================================================
+# ENGULFING
+# ============================================================
 
 def detect_engulfing(df):
     if len(df) < 2:
@@ -199,6 +207,10 @@ def detect_engulfing(df):
         return "BEARISH"
     return None
 
+# ============================================================
+# STRUCTURE
+# ============================================================
+
 def calculate_structure(df):
     if len(df) < 6:
         return None
@@ -206,17 +218,16 @@ def calculate_structure(df):
     highs = df["high"].rolling(5).max()
     lows = df["low"].rolling(5).min()
 
-    if pd.isna(highs.iloc[-1]) or pd.isna(highs.iloc[-5]):
-        return None
-
     if highs.iloc[-1] > highs.iloc[-5]:
         return "HH"
+
     if lows.iloc[-1] < lows.iloc[-5]:
         return "LL"
+
     return None
 
 # ============================================================
-# VOLATILITY ENGINE (NaN SAFE)
+# ATR
 # ============================================================
 
 def calculate_atr(df, period=14):
@@ -231,12 +242,10 @@ def calculate_atr(df, period=14):
     true_range = ranges.max(axis=1)
 
     atr = true_range.rolling(period).mean()
-    atr = atr.fillna(0)
-
-    return atr
+    return atr.fillna(0)
 
 # ============================================================
-# SCORE (LOGIC UNCHANGED — SAFE EXECUTION)
+# WEIGHTED MICRO DUAL-DIRECTION ENGINE
 # ============================================================
 
 def calculate_score(df_2h, df_30m, df_15m,
@@ -244,73 +253,95 @@ def calculate_score(df_2h, df_30m, df_15m,
                     engulf_30m, engulf_15m,
                     structure_30m, structure_15m):
 
-    if df_2h.empty or df_30m.empty or df_15m.empty:
-        return 0
+    buy_points = 0
+    sell_points = 0
+    total_weight = 16  # fixed total micro weight
 
-    total_score = 0
-
-    # 2H TREND
-    if trend_2h != "RANGE":
-        total_score += 8
-
-    slope_series = df_2h["close"].rolling(10).mean().diff()
-    slope = slope_series.iloc[-1] if not slope_series.empty else 0
-
-    if not pd.isna(slope) and abs(slope) > 0:
-        total_score += 6
-
-    sma20 = df_2h["close"].rolling(20).mean().iloc[-1]
-    if not pd.isna(sma20):
-        distance = abs(df_2h["close"].iloc[-1] - sma20)
-        if distance > df_2h["close"].std():
-            total_score += 6
-
-    # VOLATILITY
-    atr_15 = calculate_atr(df_15m).iloc[-1]
-    atr_30 = calculate_atr(df_30m).iloc[-1]
-
-    if atr_15 > df_15m["close"].std():
-        total_score += 10
-
-    if atr_30 > df_30m["close"].std():
-        total_score += 10
-
-    # 30M
-    if trend_30m == trend_2h:
-        total_score += 8
-
-    if structure_30m:
-        total_score += 6
-
-    if engulf_30m:
-        body = abs(df_30m.iloc[-1]["close"] - df_30m.iloc[-1]["open"])
-        candle_range = df_30m.iloc[-1]["high"] - df_30m.iloc[-1]["low"]
-        if candle_range > 0 and body / candle_range > 0.6:
-            total_score += 6
-
-    # 15M
-    if trend_15m == trend_2h:
-        total_score += 8
-
-    if structure_15m:
-        total_score += 6
-
-    if engulf_15m:
-        total_score += 6
-
-    # RISK
-    if RR_RATIO >= 2:
-        total_score += 10
+    # HTF Trend (4)
+    if trend_2h == "UP":
+        buy_points += 2
+    elif trend_2h == "DOWN":
+        sell_points += 2
 
     if trend_2h == trend_30m == trend_15m:
-        total_score += 10
+        if trend_2h == "UP":
+            buy_points += 2
+        elif trend_2h == "DOWN":
+            sell_points += 2
 
-    debug_log(f"[TOTAL INSTITUTIONAL SCORE] {total_score}/100")
+    # Structure (4)
+    if structure_30m == "HH":
+        buy_points += 2
+    if structure_30m == "LL":
+        sell_points += 2
 
-    return total_score
+    if structure_15m == "HH":
+        buy_points += 2
+    if structure_15m == "LL":
+        sell_points += 2
+
+    # Liquidity (2)
+    recent_high = df_15m["high"].rolling(10).max().iloc[-2]
+    recent_low = df_15m["low"].rolling(10).min().iloc[-2]
+    last_high = df_15m["high"].iloc[-1]
+    last_low = df_15m["low"].iloc[-1]
+    last_close = df_15m["close"].iloc[-1]
+
+    if last_low < recent_low and last_close > recent_low:
+        buy_points += 1
+    if last_high > recent_high and last_close < recent_high:
+        sell_points += 1
+
+    # Engulfing (2)
+    if engulf_30m == "BULLISH":
+        buy_points += 1
+    if engulf_30m == "BEARISH":
+        sell_points += 1
+    if engulf_15m == "BULLISH":
+        buy_points += 1
+    if engulf_15m == "BEARISH":
+        sell_points += 1
+
+    # Momentum (1)
+    slope = df_15m["close"].rolling(10).mean().diff().iloc[-1]
+    if not pd.isna(slope):
+        if slope > 0:
+            buy_points += 1
+        elif slope < 0:
+            sell_points += 1
+
+    # ATR Expansion (1)
+    atr_15 = calculate_atr(df_15m).iloc[-1]
+    if atr_15 > df_15m["close"].std():
+        if trend_2h == "UP":
+            buy_points += 1
+        elif trend_2h == "DOWN":
+            sell_points += 1
+
+    # Premium / Discount (2)
+    swing_high = df_30m["high"].rolling(20).max().iloc[-1]
+    swing_low = df_30m["low"].rolling(20).min().iloc[-1]
+    equilibrium = (swing_high + swing_low) / 2
+    current_price = df_15m["close"].iloc[-1]
+
+    if trend_2h == "UP" and current_price < equilibrium:
+        buy_points += 2
+    if trend_2h == "DOWN" and current_price > equilibrium:
+        sell_points += 2
+
+    buy_conf = (buy_points / total_weight) * 100
+    sell_conf = (sell_points / total_weight) * 100
+
+    debug_log(f"[BUY] {buy_points}/{total_weight} → {buy_conf:.2f}%")
+    debug_log(f"[SELL] {sell_points}/{total_weight} → {sell_conf:.2f}%")
+
+    if buy_conf >= sell_conf:
+        return "BUY", buy_conf
+    else:
+        return "SELL", sell_conf
 
 # ============================================================
-# TELEGRAM (UNCHANGED)
+# TELEGRAM
 # ============================================================
 
 def send_telegram(message):
@@ -352,7 +383,7 @@ def main():
         structure_30m = calculate_structure(df_30m)
         structure_15m = calculate_structure(df_15m)
 
-        confidence = calculate_score(
+        direction, confidence = calculate_score(
             df_2h, df_30m, df_15m,
             trend_2h, trend_30m, trend_15m,
             engulf_30m, engulf_15m,
@@ -363,14 +394,12 @@ def main():
 
             entry = df_15m["close"].iloc[-1]
 
-            if trend_2h == "UP":
+            if direction == "BUY":
                 sl = df_15m["low"].iloc[-1] * 0.999
                 tp = entry + (entry - sl) * RR_RATIO
-                direction = "BUY"
             else:
                 sl = df_15m["high"].iloc[-1] * 1.001
                 tp = entry - (sl - entry) * RR_RATIO
-                direction = "SELL"
 
             message = (
                 f"{symbol} {direction}\n"
