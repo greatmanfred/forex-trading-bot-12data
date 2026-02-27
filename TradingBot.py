@@ -15,8 +15,10 @@ CONFIDENCE_THRESHOLD = 68   # Balanced Institutional Mode
 
 DEBUG = True
 
-minute_call_count = 0daily_call_count = 0minute_window_start = time.time()daily_window_start = time.time()
-
+minute_call_count = 0
+daily_call_count = 0
+minute_window_start = time.time()
+daily_window_start = time.time()
 ============================================================
 
 SYMBOL LIST
